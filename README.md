@@ -1,4 +1,4 @@
-# Stockroom warehouse application
+# Warehouse Order Fulfillment & Picking Optimization Platform
 
 This project contains a React/Vite frontend, a Spring Boot API, a MySQL schema, and project documentation. Open this folder in VS Code, then use the two-terminal setup below to run the application.
 
