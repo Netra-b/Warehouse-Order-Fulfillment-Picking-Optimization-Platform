@@ -35,7 +35,6 @@ import {
   getPickingTasks,
   getProducts,
   getCurrentUser,
-  getReportSummary,
   logout,
   updateProduct,
 } from './api'
@@ -47,7 +46,6 @@ const navigation = [
   { id: 'products', label: 'Products', icon: Boxes },
   { id: 'orders', label: 'Orders', icon: ShoppingCart },
   { id: 'picking', label: 'Picking lists', icon: ClipboardList },
-  { id: 'reports', label: 'Reports', icon: BarChart3 },
 ]
 
 const titles = {
@@ -55,7 +53,6 @@ const titles = {
   products: ['Products', 'Manage your inventory, locations, and stock levels.'],
   orders: ['Orders', 'Keep customer orders moving from request to dispatch.'],
   picking: ['Picking lists', 'Pick the right items from the right locations.'],
-  reports: ['Reports', 'A clear view of your inventory and fulfillment.'],
 }
 
 const dashboardDate = new Intl.DateTimeFormat('en-US', {
@@ -69,15 +66,13 @@ function fetchWorkspaceData() {
     getProducts(),
     getOrders(),
     getPickingTasks(),
-    getReportSummary(),
-  ]).then(([products, orders, tasks, report]) => ({ products, orders, tasks, report }))
+  ]).then(([products, orders, tasks]) => ({ products, orders, tasks }))
 }
 
 const initialData = {
   products: [],
   orders: [],
   tasks: [],
-  report: null,
 }
 
 function currency(value) {
@@ -256,8 +251,8 @@ function Workspace({ user, onLogout }) {
             >
               <Icon size={18} strokeWidth={1.8} />
               <span>{label}</span>
-              {id === 'picking' && data.report?.openPickingTasks > 0 && (
-                <span className="nav-count">{data.report.openPickingTasks}</span>
+              {id === 'picking' && data.tasks.filter((task) => task.status !== 'PICKED').length > 0 && (
+                <span className="nav-count">{data.tasks.filter((task) => task.status !== 'PICKED').length}</span>
               )}
             </button>
           ))}
@@ -324,7 +319,6 @@ function Workspace({ user, onLogout }) {
               {activeView === 'products' && <ProductsView {...viewProps} />}
               {activeView === 'orders' && <OrdersView {...viewProps} />}
               {activeView === 'picking' && <PickingView {...viewProps} />}
-              {activeView === 'reports' && <ReportsView {...viewProps} />}
             </>
           )}
         </section>
@@ -382,18 +376,27 @@ function MetricCard({ label, value, note, icon: Icon, tone = 'mint', trend }) {
 }
 
 function DashboardView({ data, onNavigate }) {
-  const { products, orders, tasks, report } = data
+  const { products, orders, tasks } = data
   const lowStock = products.filter((product) => product.quantity <= 5)
   const recentOrders = orders.slice(0, 5)
-  const maxStatusCount = Math.max(report?.pendingOrders || 0, report?.completedOrders || 0, report?.ordersByStatus?.IN_PROGRESS || 0, 1)
+  const pendingOrders = orders.filter((order) => order.status === 'PENDING').length
+  const inProgressOrders = orders.filter((order) => order.status === 'IN_PROGRESS').length
+  const completedOrders = orders.filter((order) => order.status === 'COMPLETED').length
+  const openPickingTasks = tasks.filter((task) => task.status !== 'PICKED').length
+  const totalUnits = products.reduce((total, product) => total + Number(product.quantity), 0)
+  const inventoryValue = products.reduce(
+    (total, product) => total + Number(product.unitPrice) * Number(product.quantity),
+    0,
+  )
+  const maxStatusCount = Math.max(pendingOrders, completedOrders, inProgressOrders, 1)
 
   return (
     <>
       <div className="metric-grid">
-        <MetricCard label="Total products" value={report?.totalProducts ?? 0} note="Across all warehouse locations" icon={Boxes} tone="mint" trend={{ text: 'In catalog', direction: 'up' }} />
-        <MetricCard label="Units in stock" value={(report?.totalUnits ?? 0).toLocaleString()} note={`${report?.lowStockCount ?? 0} products running low`} icon={Package} tone="lavender" />
-        <MetricCard label="Open orders" value={orders.filter((order) => order.status !== 'COMPLETED').length} note={`${report?.openPickingTasks ?? 0} items to pick`} icon={ShoppingCart} tone="peach" trend={{ text: 'Needs attention', direction: 'down' }} />
-        <MetricCard label="Inventory value" value={currency(report?.inventoryValue)} note="Based on current unit prices" icon={BarChart3} tone="blue" />
+        <MetricCard label="Total products" value={products.length} note="Across all warehouse locations" icon={Boxes} tone="mint" />
+        <MetricCard label="Units in stock" value={totalUnits.toLocaleString()} note={`${lowStock.length} products running low`} icon={Package} tone="lavender" />
+        <MetricCard label="Open orders" value={pendingOrders + inProgressOrders} note={`${openPickingTasks} items to pick`} icon={ShoppingCart} tone="peach" />
+        <MetricCard label="Inventory value" value={currency(inventoryValue)} note="Based on current unit prices" icon={BarChart3} tone="blue" />
       </div>
 
       <div className="dashboard-grid">
@@ -427,12 +430,12 @@ function DashboardView({ data, onNavigate }) {
             <div><h2>Order fulfillment</h2><p>Current order status breakdown.</p></div>
             <span className="period-pill">All time <ChevronDown size={13} /></span>
           </div>
-          <div className="fulfillment-total"><strong>{report?.totalOrders ?? 0}</strong><span>total orders</span></div>
+          <div className="fulfillment-total"><strong>{orders.length}</strong><span>total orders</span></div>
           <div className="status-bars">
             {[
-              ['Pending', report?.pendingOrders ?? 0, 'bar-pending'],
-              ['In progress', report?.ordersByStatus?.IN_PROGRESS ?? 0, 'bar-progress'],
-              ['Completed', report?.completedOrders ?? 0, 'bar-completed'],
+              ['Pending', pendingOrders, 'bar-pending'],
+              ['In progress', inProgressOrders, 'bar-progress'],
+              ['Completed', completedOrders, 'bar-completed'],
             ].map(([label, count, barClass]) => (
               <div className="status-bar-row" key={label}>
                 <div className="status-bar-label"><span><i className={barClass} />{label}</span><strong>{count}</strong></div>
@@ -440,7 +443,7 @@ function DashboardView({ data, onNavigate }) {
               </div>
             ))}
           </div>
-          <button className="full-width-link" onClick={() => onNavigate('reports')}>Explore reports <ChevronRight size={15} /></button>
+          <button className="full-width-link" onClick={() => onNavigate('orders')}>View orders <ChevronRight size={15} /></button>
         </section>
 
         <section className="panel inventory-panel">
@@ -576,50 +579,6 @@ function PickingView({ data, onCompleteTask }) {
           <div className="completed-list">{completedTasks.slice(0, 5).map((task) => <div className="completed-task" key={task.id}><CheckCircle2 size={17} /><strong>{task.productName}</strong><span>{task.locationCode}</span><span>Order #{task.orderId}</span><StatusBadge status={task.status} /></div>)}</div>
         </section>
       )}
-    </>
-  )
-}
-
-function ReportsView({ data }) {
-  const report = data.report || {}
-  const statuses = [
-    { key: 'PENDING', label: 'Pending', color: 'chart-coral' },
-    { key: 'IN_PROGRESS', label: 'In progress', color: 'chart-violet' },
-    { key: 'COMPLETED', label: 'Completed', color: 'chart-green' },
-  ]
-  const max = Math.max(...statuses.map(({ key }) => report.ordersByStatus?.[key] || 0), 1)
-  return (
-    <>
-      <div className="report-banner">
-        <div><span className="report-kicker">WAREHOUSE SNAPSHOT</span><h2>Your operations, in perspective.</h2><p>Summary based on all orders and current inventory.</p></div>
-        <div className="report-banner-icon"><BarChart3 size={27} /></div>
-      </div>
-      <div className="report-metrics">
-        <MetricCard label="Completed order value" value={currency(report.completedOrderValue)} note="Completed orders at current prices" icon={ArrowUpRight} tone="mint" />
-        <MetricCard label="Inventory value" value={currency(report.inventoryValue)} note="Total on-hand stock value" icon={Boxes} tone="lavender" />
-        <MetricCard label="Low stock products" value={report.lowStockCount ?? 0} note="5 units or fewer remaining" icon={AlertTriangle} tone="peach" />
-        <MetricCard label="Open picking tasks" value={report.openPickingTasks ?? 0} note="Items not yet picked" icon={ClipboardList} tone="blue" />
-      </div>
-      <div className="reports-grid">
-        <section className="panel report-chart-panel">
-          <div className="panel-heading"><div><h2>Orders by status</h2><p>All customer orders in the system.</p></div><span className="period-pill">All time</span></div>
-          <div className="report-chart">
-            {statuses.map(({ key, label, color }) => {
-              const count = report.ordersByStatus?.[key] || 0
-              return <div className="chart-row" key={key}><div className="chart-label"><span>{label}</span><strong>{count}</strong></div><div className="chart-track"><span className={color} style={{ width: `${(count / max) * 100}%` }} /></div></div>
-            })}
-          </div>
-          <div className="chart-total"><span>Total orders</span><strong>{report.totalOrders ?? 0}</strong></div>
-        </section>
-        <section className="panel report-breakdown-panel">
-          <div className="panel-heading"><div><h2>Inventory breakdown</h2><p>Current warehouse capacity.</p></div><Package size={18} className="muted-icon" /></div>
-          <div className="breakdown-row"><span><i className="dot dot-green" />Healthy stock</span><strong>{Math.max((report.totalProducts ?? 0) - (report.lowStockCount ?? 0), 0)} products</strong></div>
-          <div className="breakdown-row"><span><i className="dot dot-orange" />Low stock</span><strong>{report.lowStockCount ?? 0} products</strong></div>
-          <div className="breakdown-divider" />
-          <div className="breakdown-highlight"><span>Total units in stock</span><strong>{(report.totalUnits ?? 0).toLocaleString()}</strong></div>
-          <div className="breakdown-highlight"><span>Active orders</span><strong>{(report.totalOrders ?? 0) - (report.completedOrders ?? 0)}</strong></div>
-        </section>
-      </div>
     </>
   )
 }
